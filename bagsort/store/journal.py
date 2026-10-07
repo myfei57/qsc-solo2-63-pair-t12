@@ -98,6 +98,24 @@ class Journal:
         self._pending = []
         return dropped
 
+    def compact(self, before: int, kinds: frozenset, keep: set[int]) -> int:
+        """Drop committed entries below ``before`` whose kind is compactable.
+
+        Entries named in ``keep`` survive even when they qualify, so a
+        forensic hold pins its scope in place. One pass, constant-time pin
+        checks; returns how many entries were dropped.
+        """
+
+        retained: list[JournalEntry] = []
+        dropped = 0
+        for entry in self._committed:
+            if entry.sequence < before and entry.kind in kinds and entry.sequence not in keep:
+                dropped += 1
+                continue
+            retained.append(entry)
+        self._committed = retained
+        return dropped
+
     def tombstones(self) -> list[JournalEntry]:
         return [entry for entry in self._committed if entry.tombstone]
 

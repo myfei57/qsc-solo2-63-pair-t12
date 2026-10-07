@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from bagsort.clock import Clock
 from bagsort.errors import OrderingError
+from bagsort.hold.guard import ensure_not_held
 from bagsort.model.entities import Flight
 from bagsort.model.enums import FlightState
 from bagsort.model.errors import unknown_flight
@@ -107,6 +108,7 @@ class FlightBook:
         """Retire a flight (tombstone); bags mapped to it lose their mapping."""
 
         self.get(flight_id)
+        ensure_not_held(self._store.state(), flight_id, "flight retirement")
         with self._store.session() as session:
             session.state.flights.pop(flight_id, None)
             session.state.mappings = {

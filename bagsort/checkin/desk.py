@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from bagsort.clock import Clock
 from bagsort.errors import QuotaError
+from bagsort.hold.guard import ensure_not_held
 from bagsort.model.entities import Bag
 from bagsort.model.enums import BagState
 from bagsort.model.errors import unknown_bag
@@ -67,6 +68,7 @@ class Desk:
         bag = self._store.state().bags.get(bag_id)
         if bag is None:
             raise unknown_bag(bag_id)
+        ensure_not_held(self._store.state(), bag_id, "check-in cancellation")
         updated = bag.evolved(state=BagState.DIVERTED)
         with self._store.session() as session:
             session.state.bags[updated.id] = updated

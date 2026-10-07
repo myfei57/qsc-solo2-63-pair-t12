@@ -152,10 +152,19 @@ def route_table() -> list[Route]:
         Route("POST", "/api/store/persist", "persist a snapshot", "handle_persist"),
         Route("POST", "/api/store/replay", "rebuild state from the journal", "handle_replay"),
         Route("POST", "/api/store/rollback", "roll back buffered commands", "handle_rollback"),
+        Route("POST", "/api/store/compact", "compact history below a watermark", "handle_compact"),
+        # -- holds --------------------------------------------------------
+        Route("GET", "/api/holds", "list forensic holds", "handle_list_holds"),
+        Route("POST", "/api/holds", "place a forensic hold", "handle_place_hold"),
+        Route("GET", "/api/holds/active", "holds still in force", "handle_active_holds"),
+        Route("GET", "/api/holds/{id}", "read one forensic hold", "handle_get_hold"),
+        Route("POST", "/api/holds/{id}/release", "release an expired hold", "handle_release_hold"),
+        Route("GET", "/api/holds/{id}/review", "entry by entry scope review", "handle_review_hold"),
         # -- export -------------------------------------------------------
         Route("GET", "/api/export/audit.csv", "audit trail as CSV", "handle_export_audit"),
         Route("GET", "/api/export/sort.csv", "sort records as CSV", "handle_export_sort"),
         Route("GET", "/api/export/loads.csv", "load records as CSV", "handle_export_loads"),
+        Route("GET", "/api/export/holds.csv", "forensic holds as CSV", "handle_export_holds"),
     ]
 
 

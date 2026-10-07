@@ -8,10 +8,15 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from bagsort.errors import ConflictError, ValidationError
-from bagsort.model.state import State
+from bagsort.model.state import State, held_sequences
 from .journal import Journal, JournalEntry
 from .replay import replay
 from .snapshot import Envelope, build
+
+# Only pure history appends are ever compacted: entity commands and the audit
+# chain always survive, so replay after compaction still rebuilds every live
+# entity and the chain still verifies.
+COMPACTABLE_KINDS = frozenset({"sort.record", "load.append", "transfer.append"})
 
 
 class Session:
@@ -126,11 +131,34 @@ class Store:
         return dropped
 
     def reset(self) -> None:
-        """Drop the whole history, keeping the store usable."""
+        """Drop the whole history, keeping the store usable.
 
+        Barred while any forensic hold is in force: wiping the journal would
+        destroy the very records the hold exists to preserve.
+        """
+
+        active = [hold for hold in self.state().holds.values() if hold.active]
+        if active:
+            raise ConflictError(
+                f"{len(active)} forensic hold(s) still in force; reset is barred"
+            )
         self._journal = Journal()
         self._cache = State()
         self._dirty = True
+
+    def compact(self, before: int) -> int:
+        """Reclaim compactable history below ``before``, never held entries.
+
+        The pin set is derived from the active holds on every call, so a
+        caller cannot forget it; entries a hold covers stay in the journal
+        until the hold is released.
+        """
+
+        dropped = self._journal.compact(before, COMPACTABLE_KINDS, held_sequences(self.state()))
+        if dropped:
+            self._cache = None
+            self._dirty = True
+        return dropped
 
     # -- persistence -------------------------------------------------------
 

@@ -15,6 +15,7 @@ from .entities import (
     Bag,
     ChuteAssignment,
     Flight,
+    Hold,
     LoadRecord,
     Sequence,
     SortRecord,
@@ -35,6 +36,7 @@ class State:
     transfer_commands: list[TransferCommand] = field(default_factory=list)
     load_records: list[LoadRecord] = field(default_factory=list)
     audit: list[AuditEntry] = field(default_factory=list)
+    holds: dict[str, Hold] = field(default_factory=dict)
     quota_limits: dict[str, int] = field(default_factory=dict)
     counters: dict[str, int] = field(default_factory=dict)
     sequence: Sequence = field(default_factory=Sequence)
@@ -53,6 +55,7 @@ class State:
             transfer_commands=list(self.transfer_commands),
             load_records=list(self.load_records),
             audit=list(self.audit),
+            holds=dict(self.holds),
             quota_limits=dict(self.quota_limits),
             counters=dict(self.counters),
             sequence=self.sequence,
@@ -74,6 +77,7 @@ class State:
             "transfer_commands": [command.as_dict() for command in self.transfer_commands],
             "load_records": [record.as_dict() for record in self.load_records],
             "audit": [entry.as_dict() for entry in self.audit],
+            "holds": {key: value.as_dict() for key, value in sorted(self.holds.items())},
             "quota_limits": dict(sorted(self.quota_limits.items())),
             "counters": dict(sorted(self.counters.items())),
             "sequence": self.sequence.as_dict(),
@@ -124,6 +128,9 @@ def apply_entry(state: State, kind: str, payload: dict[str, Any]) -> None:
         state.load_records.append(LoadRecord.from_dict(payload["record"]))
     elif kind == "audit.append":
         state.audit.append(AuditEntry.from_dict(payload["entry"]))
+    elif kind in ("hold.place", "hold.release"):
+        hold = Hold.from_dict(payload["hold"])
+        state.holds[hold.id] = hold
     elif kind == "quota.set":
         state.quota_limits[str(payload["flight_id"])] = int(payload["limit"])
     elif kind == "quota.adjust":
@@ -155,6 +162,17 @@ def apply_entry(state: State, kind: str, payload: dict[str, Any]) -> None:
         state.belt_batch = int(payload.get("batch", state.belt_batch))
     else:  # pragma: no cover - guards against a typo in a new command kind
         raise ValidationError(f"unknown journal command {kind!r}")
+
+
+def held_sequences(state: State) -> set[int]:
+    """Journal sequences pinned by a hold that is still in force."""
+
+    return {
+        item.sequence
+        for hold in state.holds.values()
+        if hold.active
+        for item in hold.scope
+    }
 
 
 def fold(entries: list[tuple[str, dict[str, Any]]]) -> State:

@@ -760,6 +760,51 @@ def handle_rollback(server, request: Request) -> Response:
     return json_response({"dropped": dropped, "pending": len(plant.store.pending())})
 
 
+def handle_compact(server, request: Request) -> Response:
+    plant = _plant(server)
+    dropped = plant.compact_history(request.int_field("before"))
+    return json_response({"dropped": dropped, "watermark": plant.store.watermark})
+
+
+# ---------------------------------------------------------------------------
+# forensic holds
+# ---------------------------------------------------------------------------
+
+
+def handle_list_holds(server, request: Request) -> Response:
+    return json_response([hold.as_dict() for hold in _plant(server).holds.list()])
+
+
+def handle_active_holds(server, request: Request) -> Response:
+    return json_response([hold.as_dict() for hold in _plant(server).holds.active()])
+
+
+def handle_place_hold(server, request: Request) -> Response:
+    hold = _plant(server).place_hold(
+        request.required("subject"),
+        request.required("reason"),
+        request.required("authority"),
+        request.int_field("retention_seconds"),
+        request.str_field("event_at"),
+    )
+    return json_response(hold.as_dict(), status=201)
+
+
+def handle_get_hold(server, request: Request) -> Response:
+    return json_response(_plant(server).holds.get(request.param("id")).as_dict())
+
+
+def handle_release_hold(server, request: Request) -> Response:
+    hold = _plant(server).release_hold(
+        request.param("id"), request.required("authority"), request.required("basis")
+    )
+    return json_response(hold.as_dict())
+
+
+def handle_review_hold(server, request: Request) -> Response:
+    return json_response(_plant(server).review_hold(request.param("id")))
+
+
 # ---------------------------------------------------------------------------
 # export
 # ---------------------------------------------------------------------------
@@ -778,3 +823,8 @@ def handle_export_sort(server, request: Request) -> Response:
 def handle_export_loads(server, request: Request) -> Response:
     records = _plant(server).belt.loads()
     return csv_response(csv_export.render(csv_export.LOAD_COLUMNS, csv_export.load_rows(records)))
+
+
+def handle_export_holds(server, request: Request) -> Response:
+    holds = _plant(server).holds.list()
+    return csv_response(csv_export.render(csv_export.HOLD_COLUMNS, csv_export.hold_rows(holds)))

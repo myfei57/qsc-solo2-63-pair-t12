@@ -252,6 +252,82 @@ class Sequence:
 
 
 @dataclass(frozen=True)
+class ScopeEntry:
+    """One journal entry pinned by a forensic hold, with its digest at placement."""
+
+    sequence: int
+    kind: str
+    digest: str
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"sequence": self.sequence, "kind": self.kind, "digest": self.digest}
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "ScopeEntry":
+        return cls(
+            sequence=int(raw.get("sequence", 0)),
+            kind=str(raw.get("kind", "")),
+            digest=str(raw.get("digest", "")),
+        )
+
+
+@dataclass(frozen=True)
+class Hold:
+    """A forensic hold: a registered scope of records frozen until ``until``."""
+
+    id: str
+    subject: str
+    reason: str
+    authority: str
+    event_at: str
+    until: str
+    placed_at: str
+    scope: tuple[ScopeEntry, ...] = ()
+    released_at: str = ""
+    released_by: str = ""
+    release_basis: str = ""
+
+    @property
+    def active(self) -> bool:
+        return not self.released_at
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "subject": self.subject,
+            "reason": self.reason,
+            "authority": self.authority,
+            "event_at": self.event_at,
+            "until": self.until,
+            "placed_at": self.placed_at,
+            "scope": [entry.as_dict() for entry in self.scope],
+            "active": self.active,
+            "released_at": self.released_at,
+            "released_by": self.released_by,
+            "release_basis": self.release_basis,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "Hold":
+        return cls(
+            id=str(raw["id"]),
+            subject=str(raw.get("subject", "")),
+            reason=str(raw.get("reason", "")),
+            authority=str(raw.get("authority", "")),
+            event_at=str(raw.get("event_at", "")),
+            until=str(raw.get("until", "")),
+            placed_at=str(raw.get("placed_at", "")),
+            scope=tuple(ScopeEntry.from_dict(item) for item in raw.get("scope", [])),
+            released_at=str(raw.get("released_at", "")),
+            released_by=str(raw.get("released_by", "")),
+            release_basis=str(raw.get("release_basis", "")),
+        )
+
+    def evolved(self, **changes: Any) -> "Hold":
+        return replace(self, **changes)
+
+
+@dataclass(frozen=True)
 class AuditEntry:
     sequence: int
     kind: str

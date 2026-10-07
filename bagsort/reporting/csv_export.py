@@ -58,6 +58,34 @@ def load_rows(records: Iterable[object]) -> list[dict[str, object]]:
     ]
 
 
+def hold_rows(holds: Iterable[object]) -> list[dict[str, object]]:
+    return [
+        {
+            "id": hold.id,
+            "subject": hold.subject,
+            "authority": hold.authority,
+            "event_at": hold.event_at,
+            "until": hold.until,
+            "active": hold.active,
+            "scope": len(hold.scope),
+            "released_at": hold.released_at,
+            "released_by": hold.released_by,
+        }
+        for hold in holds
+    ]
+
+
 AUDIT_COLUMNS = ("sequence", "kind", "subject", "stage", "at", "digest")
 SORT_COLUMNS = ("bag_id", "flight_id", "chute_id", "sequence", "epoch", "at")
 LOAD_COLUMNS = ("bag_id", "carousel", "batch", "at")
+HOLD_COLUMNS = (
+    "id",
+    "subject",
+    "authority",
+    "event_at",
+    "until",
+    "active",
+    "scope",
+    "released_at",
+    "released_by",
+)

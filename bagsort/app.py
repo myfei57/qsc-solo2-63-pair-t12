@@ -19,9 +19,10 @@ from bagsort.flight.book import FlightBook
 from bagsort.flight.close import FlightCloser
 from bagsort.flight.mapping import BagMapping
 from bagsort.flight.schedule import ScheduleBoard
+from bagsort.hold.hold import HoldBook
 from bagsort.ids import IdFactory
 from bagsort.inject.injector import Injector
-from bagsort.model.entities import Bag, Flight, Reading, SortRecord
+from bagsort.model.entities import Bag, Flight, Hold, Reading, SortRecord
 from bagsort.model.errors import unknown_bag
 from bagsort.ns.chutes import ChuteRegistry
 from bagsort.ns.namespace import Namespace
@@ -68,6 +69,7 @@ class Plant:
     belt: Belt
     quota: QuotaBook
     audit: AuditChain
+    holds: HoldBook
     report: PlantReport
 
     @property
@@ -105,6 +107,7 @@ class Plant:
         closer = FlightCloser(book)
         recheck = RecheckQueue(store, book, clock)
         belt = Belt(store, clock, IdFactory("cmd"))
+        holds = HoldBook(store, clock, IdFactory("hold"))
 
         audit = AuditChain(store, clock, handling_line())
         audit_subscriber = _AuditSubscriber(audit)
@@ -117,6 +120,8 @@ class Plant:
             "chute.assigned",
             "belt.switched",
             "bag.remapped",
+            "hold.placed",
+            "hold.released",
         ):
             bus.subscribe(topic, audit_subscriber)
 
@@ -146,6 +151,7 @@ class Plant:
             belt=belt,
             quota=quota,
             audit=audit,
+            holds=holds,
             report=report,
         )
 
@@ -243,6 +249,44 @@ class Plant:
     def set_quota(self, flight_id: str, limit: int) -> int:
         return self.quota.set_limit(flight_id, limit)
 
+    def place_hold(
+        self,
+        subject: str,
+        reason: str,
+        authority: str,
+        retention_seconds: int,
+        event_at: str = "",
+    ) -> Hold:
+        hold = self.holds.place(subject, reason, authority, retention_seconds, event_at)
+        self.bus.publish(
+            "hold.placed",
+            subject=hold.subject,
+            hold_id=hold.id,
+            until=hold.until,
+            authority=hold.authority,
+        )
+        return hold
+
+    def release_hold(self, hold_id: str, authority: str, basis: str) -> Hold:
+        hold = self.holds.release(hold_id, authority, basis)
+        self.bus.publish(
+            "hold.released",
+            subject=hold.subject,
+            hold_id=hold.id,
+            released_by=hold.released_by,
+            basis=hold.release_basis,
+        )
+        return hold
+
+    def review_hold(self, hold_id: str) -> dict[str, object]:
+        report = self.holds.review(hold_id)
+        report["verified"] = self.holds.verify(hold_id)
+        report["audit_chain_intact"] = self.audit.verify()
+        return report
+
+    def compact_history(self, before: int) -> int:
+        return self.store.compact(before)
+
     def verify(self) -> bool:
         return self.audit.verify()
 
@@ -259,6 +303,8 @@ class _AuditSubscriber:
         "chute.assigned": ("chute_assign", "chute"),
         "belt.switched": ("belt_switch", "belt"),
         "bag.remapped": ("remap", "checkin"),
+        "hold.placed": ("hold_place", "audit"),
+        "hold.released": ("hold_release", "audit"),
     }
 
     def __init__(self, audit: AuditChain) -> None:
@@ -273,11 +319,12 @@ class _AuditSubscriber:
             event.payload.get("bag_id")
             or event.payload.get("flight_id")
             or event.payload.get("carousel")
+            or event.payload.get("subject")
             or ""
         )
         detail = {
             key: value
             for key, value in event.payload.items()
-            if key not in {"bag_id", "flight_id"}
+            if key not in {"bag_id", "flight_id", "subject"}
         }
         self._audit.record(kind, subject, stage, detail)

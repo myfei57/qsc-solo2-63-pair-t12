@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from bagsort.clock import Clock
 from bagsort.errors import OrderingError
+from bagsort.hold.guard import ensure_not_held
 from bagsort.ids import IdFactory
 from bagsort.model.entities import Bag, LoadRecord, TransferCommand
 from bagsort.model.enums import BagState
@@ -124,6 +125,9 @@ class Belt:
         ]
         if not doomed:
             return 0
+        state = self._store.state()
+        for command in doomed:
+            ensure_not_held(state, command.flight_id, "transfer grooming")
         with self._store.session() as session:
             session.state.transfer_commands = [
                 command
