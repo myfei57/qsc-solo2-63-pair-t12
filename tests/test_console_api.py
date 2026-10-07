@@ -35,10 +35,10 @@ def test_service_endpoints(server):
     assert call(server, "GET", "/api/system")[1]["terminal"] == "T1"
 
     status, topology = call(server, "GET", "/api/topology")
-    assert topology["count"] == 8
+    assert topology["count"] == 9
     status, stage = call(server, "GET", "/api/topology/tag")
     assert stage["next"] == "inject"
-    assert stage["following"] == ["inject", "sorter", "chute", "recheck", "belt", "audit"]
+    assert stage["following"] == ["inject", "sorter", "chute", "recheck", "belt", "audit", "hold"]
 
     status, catalog = call(server, "GET", "/api/catalog")
     assert status == 200

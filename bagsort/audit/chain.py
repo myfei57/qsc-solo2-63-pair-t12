@@ -31,6 +31,9 @@ class AuditChain:
     def entries(self) -> list[AuditEntry]:
         return list(self._store.state().audit)
 
+    def topology_index(self, stage: str) -> int:
+        return self._topology.index_of(stage)
+
     def count(self) -> int:
         return len(self._store.state().audit)
 

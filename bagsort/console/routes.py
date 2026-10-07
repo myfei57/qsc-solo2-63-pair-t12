@@ -156,6 +156,19 @@ def route_table() -> list[Route]:
         Route("GET", "/api/export/audit.csv", "audit trail as CSV", "handle_export_audit"),
         Route("GET", "/api/export/sort.csv", "sort records as CSV", "handle_export_sort"),
         Route("GET", "/api/export/loads.csv", "load records as CSV", "handle_export_loads"),
+        # -- forensic holds -----------------------------------------------
+        Route("POST", "/api/holds", "place a forensic hold", "handle_place_hold"),
+        Route("GET", "/api/holds", "list forensic holds", "handle_list_holds"),
+        Route("GET", "/api/holds/storage", "retained storage review", "handle_hold_storage"),
+        Route("POST", "/api/store/compact", "compact unretained history", "handle_compact_journal"),
+        Route("GET", "/api/holds/export", "verifiable hold evidence bundle", "handle_hold_export"),
+        Route("POST", "/api/holds/export/verify", "verify an exported bundle", "handle_hold_bundle_verify"),
+        Route("GET", "/api/holds/{id}", "read one hold", "handle_get_hold"),
+        Route("POST", "/api/holds/{id}/extend", "extend an event-time hold", "handle_extend_hold"),
+        Route("POST", "/api/holds/{id}/release", "release a hold with a basis", "handle_release_hold"),
+        Route("GET", "/api/holds/{id}/records", "retained records of a hold", "handle_hold_records"),
+        Route("GET", "/api/holds/{id}/verify", "re-check a hold item by item", "handle_hold_verify"),
+        Route("GET", "/api/holds/{id}/export.csv", "hold manifest as CSV", "handle_hold_export_csv"),
     ]
 
 

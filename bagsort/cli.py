@@ -14,6 +14,7 @@ from .console.seed import seed_defaults
 from .console.server import Server
 from .console.version import version_string
 from .demo import invariants_hold, run_demo
+from .hold.auth import ROLE_HOLDER, ROLE_RELEASER, issue_credential
 from .store.store import Store
 
 LOGGER = logging.getLogger("bagsort")
@@ -57,6 +58,42 @@ def build_parser() -> argparse.ArgumentParser:
 
     reset = commands.add_parser("reset", help="clear the journal")
     reset.add_argument("--persist", action="store_true", help="write the empty snapshot")
+
+    token = commands.add_parser("hold-token", help="mint a signed hold credential")
+    token.add_argument("--name", required=True, help="officer principal name")
+    token.add_argument("--role", choices=(ROLE_HOLDER, ROLE_RELEASER), required=True)
+
+    place = commands.add_parser("hold-place", help="place a forensic hold")
+    place.add_argument("--matter", required=True)
+    place.add_argument("--bag", action="append", default=[], help="bag id, repeatable")
+    place.add_argument("--flight", action="append", default=[], help="flight id, repeatable")
+    place.add_argument("--sequence", action="append", type=int, default=[])
+    place.add_argument("--anchor", choices=("event_time", "matter_close"), default="event_time")
+    place.add_argument("--event-at", default="", help="incident time, default now")
+    place.add_argument("--days", type=int, default=90, help="retention days from event")
+    place.add_argument("--rationale", default="")
+    place.add_argument("--credential", required=True)
+
+    commands.add_parser("hold-list", help="list forensic holds")
+    commands.add_parser("hold-storage", help="show retained storage and reclaimable bytes")
+
+    release = commands.add_parser("hold-release", help="release a hold with a basis")
+    release.add_argument("hold_id")
+    release.add_argument("--basis", required=True)
+    release.add_argument("--authorization", required=True)
+    release.add_argument("--credential", required=True)
+
+    extend = commands.add_parser("hold-extend", help="extend an event-time hold")
+    extend.add_argument("hold_id")
+    extend.add_argument("--days", required=True, type=int)
+    extend.add_argument("--basis", required=True)
+    extend.add_argument("--credential", required=True)
+
+    verify = commands.add_parser("hold-verify", help="re-check a hold item by item")
+    verify.add_argument("hold_id")
+
+    compact = commands.add_parser("compact", help="compact unretained history")
+    compact.add_argument("--credential", required=True)
     return parser
 
 
@@ -127,10 +164,80 @@ def _command_seed(store: Store, plant: Plant, args: argparse.Namespace) -> int:
 
 
 def _command_reset(store: Store, plant: Plant, args: argparse.Namespace) -> int:
-    store.reset()
+    plant.reset()
     if args.persist:
         store.persist()
     print(json.dumps({"status": "reset", "watermark": store.watermark}, sort_keys=True))
+    return 0
+
+
+def _command_token(args: argparse.Namespace) -> int:
+    clock = Clock()
+    token = issue_credential(args.name, args.role, clock.now_iso(), "bagsort-dev-hold-secret")
+    print(token)
+    return 0
+
+
+def _command_hold_place(store: Store, plant: Plant, args: argparse.Namespace) -> int:
+    scope = []
+    if args.bag:
+        scope.append({"kind": "bag", "ids": args.bag})
+    if args.flight:
+        scope.append({"kind": "flight", "ids": args.flight})
+    if args.sequence:
+        scope.append({"kind": "sequence", "sequences": args.sequence})
+    hold = plant.holds.place(
+        matter=args.matter,
+        scopes=scope,
+        credential=args.credential,
+        rationale=args.rationale,
+        anchor=args.anchor,
+        event_at=args.event_at,
+        retention_days=args.days,
+    )
+    print(json.dumps(hold.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _command_hold_list(plant: Plant) -> int:
+    print(
+        json.dumps(
+            [hold.as_dict() for hold in plant.holds.list()],
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _command_hold_storage(plant: Plant) -> int:
+    print(json.dumps(plant.holds.storage_review(), ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _command_hold_release(plant: Plant, args: argparse.Namespace) -> int:
+    hold = plant.holds.release(
+        args.hold_id, args.credential, args.basis, args.authorization
+    )
+    print(json.dumps(hold.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _command_hold_extend(plant: Plant, args: argparse.Namespace) -> int:
+    hold = plant.holds.extend(args.hold_id, args.days, args.credential, args.basis)
+    print(json.dumps(hold.as_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+    return 0
+
+
+def _command_hold_verify(plant: Plant, args: argparse.Namespace) -> int:
+    report = plant.holds.verify_hold(args.hold_id)
+    print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if report["intact"] else 1
+
+
+def _command_compact(plant: Plant, args: argparse.Namespace) -> int:
+    print(json.dumps(plant.holds.compact(args.credential), ensure_ascii=False, indent=2))
     return 0
 
 
@@ -163,5 +270,21 @@ def main(argv: list[str] | None = None) -> int:
         return _command_seed(store, plant, args)
     if args.command == "reset":
         return _command_reset(store, plant, args)
+    if args.command == "hold-token":
+        return _command_token(args)
+    if args.command == "hold-place":
+        return _command_hold_place(store, plant, args)
+    if args.command == "hold-list":
+        return _command_hold_list(plant)
+    if args.command == "hold-storage":
+        return _command_hold_storage(plant)
+    if args.command == "hold-release":
+        return _command_hold_release(plant, args)
+    if args.command == "hold-extend":
+        return _command_hold_extend(plant, args)
+    if args.command == "hold-verify":
+        return _command_hold_verify(plant, args)
+    if args.command == "compact":
+        return _command_compact(plant, args)
     parser.error(f"unknown command {args.command!r}")
     return 2

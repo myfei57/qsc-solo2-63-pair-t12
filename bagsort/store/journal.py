@@ -91,6 +91,20 @@ class Journal:
         self._pending = []
         return sequence
 
+    def adopt(self, entries: list[JournalEntry]) -> int:
+        """Replace the committed log with already numbered, already sealed entries.
+
+        Used by compaction and snapshot restore. Sequence numbers are preserved
+        exactly: dropping un-held history must never renumber the surviving
+        records, because hold manifests and the audit chain refer to those
+        numbers. The resulting log may therefore be sparse on purpose.
+        """
+
+        ordered = sorted(entries, key=lambda entry: entry.sequence)
+        self._committed = list(ordered)
+        self._pending = []
+        return self.watermark
+
     def rollback(self) -> int:
         """Discard the buffer; returns how many commands were dropped."""
 

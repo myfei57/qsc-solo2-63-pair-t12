@@ -6,7 +6,9 @@ import logging
 from typing import Callable
 
 from bagsort.errors import (
+    AuthorizationError,
     ConflictError,
+    HoldViolation,
     NotFoundError,
     OrderingError,
     QuotaError,
@@ -25,9 +27,11 @@ def status_for(exc: Exception) -> int:
         return exc.status
     if isinstance(exc, NotFoundError):
         return 404
+    if isinstance(exc, AuthorizationError):
+        return 403
     if isinstance(exc, ValidationError):
         return 400
-    if isinstance(exc, (ConflictError, OrderingError, StaleError, QuotaError)):
+    if isinstance(exc, (ConflictError, OrderingError, StaleError, QuotaError, HoldViolation)):
         return 409
     return 500
 

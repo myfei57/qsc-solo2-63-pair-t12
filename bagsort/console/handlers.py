@@ -88,7 +88,7 @@ def handle_stats(server, request: Request) -> Response:
 
 def handle_reset(server, request: Request) -> Response:
     plant = _plant(server)
-    plant.store.reset()
+    plant.reset()
     return json_response({"status": "cleared"})
 
 
@@ -778,3 +778,125 @@ def handle_export_sort(server, request: Request) -> Response:
 def handle_export_loads(server, request: Request) -> Response:
     records = _plant(server).belt.loads()
     return csv_response(csv_export.render(csv_export.LOAD_COLUMNS, csv_export.load_rows(records)))
+
+
+# ---------------------------------------------------------------------------
+# forensic holds
+# ---------------------------------------------------------------------------
+
+
+def _scopes(request: Request) -> list[dict[str, object]]:
+    raw = request.payload.get("scope")
+    if isinstance(raw, list):
+        return [item for item in raw if isinstance(item, dict)]
+    return []
+
+
+def handle_place_hold(server, request: Request) -> Response:
+    plant = _plant(server)
+    hold = plant.holds.place(
+        matter=request.required("matter"),
+        scopes=_scopes(request),
+        credential=request.credential(),
+        rationale=request.str_field("rationale"),
+        anchor=request.str_field("anchor", "event_time") or "event_time",
+        event_at=request.str_field("event_at"),
+        retention_days=request.int_field("retention_days", 90),
+    )
+    return json_response(hold.as_dict(), status=201)
+
+
+def handle_list_holds(server, request: Request) -> Response:
+    active = request.query_str("active") in {"1", "true", "yes"}
+    return json_response([hold.as_dict() for hold in _plant(server).holds.list(active)])
+
+
+def handle_get_hold(server, request: Request) -> Response:
+    return json_response(_plant(server).holds.get(request.param("id")).as_dict())
+
+
+def handle_extend_hold(server, request: Request) -> Response:
+    hold = _plant(server).holds.extend(
+        hold_id=request.param("id"),
+        days=request.int_field("days"),
+        credential=request.credential(),
+        basis=request.required("basis"),
+    )
+    return json_response(hold.as_dict())
+
+
+def handle_release_hold(server, request: Request) -> Response:
+    hold = _plant(server).holds.release(
+        hold_id=request.param("id"),
+        credential=request.credential(),
+        basis=request.required("basis"),
+        authorization=request.required("authorization"),
+    )
+    return json_response(hold.as_dict())
+
+
+def handle_hold_records(server, request: Request) -> Response:
+    registry = _plant(server).holds
+    hold = registry.get(request.param("id"))
+    records = []
+    for item in hold.items:
+        entry = registry.record(item.sequence)
+        records.append(
+            {
+                "sequence": entry.sequence,
+                "kind": entry.kind,
+                "at": entry.at,
+                "subject": item.subject,
+                "content_hash": item.content_hash,
+            }
+        )
+    return json_response({"hold": hold.id, "records": records})
+
+
+def handle_hold_verify(server, request: Request) -> Response:
+    return json_response(_plant(server).holds.verify_hold(request.param("id")))
+
+
+def handle_hold_storage(server, request: Request) -> Response:
+    return json_response(_plant(server).holds.storage_review())
+
+
+def handle_compact_journal(server, request: Request) -> Response:
+    return json_response(_plant(server).holds.compact(request.credential()))
+
+
+def handle_hold_export(server, request: Request) -> Response:
+    from bagsort.hold import export as hold_export
+
+    registry = _plant(server).holds
+    hold_ids = [item for item in request.query_str("holds").split(",") if item]
+    holds = [registry.get(hold_id) for hold_id in hold_ids] if hold_ids else registry.list()
+    bundle = hold_export.build_bundle(holds, _plant(server).store.entries())
+    return json_response(bundle)
+
+
+def handle_hold_export_csv(server, request: Request) -> Response:
+    registry = _plant(server).holds
+    hold = registry.get(request.param("id"))
+    rows = [
+        {
+            "hold": hold.id,
+            "matter": hold.matter,
+            "sequence": item.sequence,
+            "kind": item.kind,
+            "subject": item.subject,
+            "content_hash": item.content_hash,
+        }
+        for item in hold.items
+    ]
+    return csv_response(csv_export.render(csv_export.HOLD_COLUMNS, rows))
+
+
+def handle_hold_bundle_verify(server, request: Request) -> Response:
+    from bagsort.hold import export as hold_export
+
+    bundle = request.payload.get("bundle") and {"bundle": request.payload["bundle"], "digest": request.payload.get("digest")}
+    if bundle is None:
+        bundle = {"bundle": request.payload, "digest": ""}
+    report = hold_export.verify_bundle(bundle, _plant(server).audit.entries())
+    return json_response(report)

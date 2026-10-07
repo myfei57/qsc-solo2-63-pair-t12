@@ -61,3 +61,4 @@ def load_rows(records: Iterable[object]) -> list[dict[str, object]]:
 AUDIT_COLUMNS = ("sequence", "kind", "subject", "stage", "at", "digest")
 SORT_COLUMNS = ("bag_id", "flight_id", "chute_id", "sequence", "epoch", "at")
 LOAD_COLUMNS = ("bag_id", "carousel", "batch", "at")
+HOLD_COLUMNS = ("hold", "matter", "sequence", "kind", "subject", "content_hash")

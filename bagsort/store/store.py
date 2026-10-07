@@ -31,6 +31,9 @@ class Session:
     def record(self, kind: str, payload: dict[str, Any], at: str = "") -> None:
         if at:
             self._last_at = at
+        guard = self._store._guard
+        if guard is not None:
+            guard.vet(kind, payload)
         self._store.journal.append(kind, payload, at or self._last_at)
 
 
@@ -42,6 +45,17 @@ class Store:
         self._journal = Journal()
         self._cache: State | None = None
         self._dirty = False
+        self._guard = None
+
+    def install_guard(self, guard) -> None:
+        """Attach the forensic hold gate that vets every staged command.
+
+        The guard cannot be installed at construction because it reads the
+        folded state that only exists once this store has a journal; the hold
+        registry installs itself during plant wiring.
+        """
+
+        self._guard = guard
 
     @property
     def path(self) -> str:
@@ -88,6 +102,8 @@ class Store:
             "transfer_commands": len(state.transfer_commands),
             "load_records": len(state.load_records),
             "audit": len(state.audit),
+            "holds": len(state.holds),
+            "active_holds": sum(1 for hold in state.holds.values() if hold.active),
         }
 
     # -- write side --------------------------------------------------------
@@ -126,11 +142,25 @@ class Store:
         return dropped
 
     def reset(self) -> None:
-        """Drop the whole history, keeping the store usable."""
+        """Drop the whole history, keeping the store usable.
 
+        Refused while any hold is active: a reset is the most aggressive
+        "organisation" there is and must not be a path around retention.
+        """
+
+        if self._guard is not None:
+            self._guard.vet_reset()
         self._journal = Journal()
         self._cache = State()
         self._dirty = True
+
+    def adopt_entries(self, entries: list[JournalEntry]) -> int:
+        """Swap in a compacted (still sealed) log, preserving sequence numbers."""
+
+        watermark = self._journal.adopt(entries)
+        self._cache = None
+        self._dirty = True
+        return watermark
 
     # -- persistence -------------------------------------------------------
 
@@ -161,10 +191,7 @@ class Store:
 
         if not envelope.verify():
             raise ValidationError("snapshot digest does not match its entries")
-        self._journal = Journal()
-        for entry in envelope.entries:
-            self._journal.append(entry.kind, entry.payload, entry.at)
-        self._journal.commit()
+        self._journal.adopt(list(envelope.entries))
         self._cache = None
         self._dirty = False
 

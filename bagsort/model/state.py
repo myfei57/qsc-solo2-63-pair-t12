@@ -21,6 +21,7 @@ from .entities import (
     TransferCommand,
 )
 from bagsort.errors import ValidationError
+from bagsort.hold.manifest import HoldManifest
 
 
 @dataclass
@@ -42,6 +43,7 @@ class State:
     belt_carousel: str = ""
     belt_batch: int = 0
     belt_on_carousel: list[str] = field(default_factory=list)
+    holds: dict[str, HoldManifest] = field(default_factory=dict)
 
     def copy(self) -> "State":
         return State(
@@ -60,6 +62,7 @@ class State:
             belt_carousel=self.belt_carousel,
             belt_batch=self.belt_batch,
             belt_on_carousel=list(self.belt_on_carousel),
+            holds=dict(self.holds),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -83,7 +86,37 @@ class State:
                 "batch": self.belt_batch,
                 "on_carousel": list(self.belt_on_carousel),
             },
+            "holds": {key: value.as_dict() for key, value in sorted(self.holds.items())},
         }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> "State":
+        return cls(
+            flights={key: Flight.from_dict(value) for key, value in raw.get("flights", {}).items()},
+            bags={key: Bag.from_dict(value) for key, value in raw.get("bags", {}).items()},
+            mappings=dict(raw.get("mappings", {})),
+            assignments={
+                key: ChuteAssignment.from_dict(value)
+                for key, value in raw.get("assignments", {}).items()
+            },
+            sort_records=[SortRecord.from_dict(item) for item in raw.get("sort_records", [])],
+            transfer_commands=[
+                TransferCommand.from_dict(item) for item in raw.get("transfer_commands", [])
+            ],
+            load_records=[LoadRecord.from_dict(item) for item in raw.get("load_records", [])],
+            audit=[AuditEntry.from_dict(item) for item in raw.get("audit", [])],
+            quota_limits=dict(raw.get("quota_limits", {})),
+            counters=dict(raw.get("counters", {})),
+            sequence=Sequence.from_dict(raw.get("sequence", {})),
+            recheck_queue=list(raw.get("recheck_queue", [])),
+            belt_carousel=str(raw.get("belt", {}).get("carousel", "")),
+            belt_batch=int(raw.get("belt", {}).get("batch", 0)),
+            belt_on_carousel=list(raw.get("belt", {}).get("on_carousel", [])),
+            holds={
+                key: HoldManifest.from_dict(value)
+                for key, value in raw.get("holds", {}).items()
+            },
+        )
 
 def apply_entry(state: State, kind: str, payload: dict[str, Any]) -> None:
     """Apply one journal command to ``state`` in place."""
@@ -153,6 +186,9 @@ def apply_entry(state: State, kind: str, payload: dict[str, Any]) -> None:
         state.belt_on_carousel = []
         state.belt_carousel = str(payload.get("carousel", state.belt_carousel))
         state.belt_batch = int(payload.get("batch", state.belt_batch))
+    elif kind == "hold.put":
+        manifest = HoldManifest.from_dict(payload["hold"])
+        state.holds[manifest.id] = manifest
     else:  # pragma: no cover - guards against a typo in a new command kind
         raise ValidationError(f"unknown journal command {kind!r}")
 
@@ -163,4 +199,36 @@ def fold(entries: list[tuple[str, dict[str, Any]]]) -> State:
     state = State()
     for kind, payload in entries:
         apply_entry(state, kind, payload)
+    return state
+
+
+def fold_entries(entries: list[tuple[int, str, dict[str, Any]]]) -> State:
+    """Fold numbered commands, honouring a compaction checkpoint.
+
+    A ``state.snapshot`` replaces the folded state wholesale. Records it
+    summarises were physically removed at compaction time, but pinned records
+    that survived below the checkpoint (sparse numbering) are named in
+    ``folded_sequences`` and skipped, because the snapshot already reflects
+    them. Only commands strictly above the truncation watermark are folded on.
+
+    Audit entries are eternal (every ``audit.append`` survives compaction and
+    its audit sequence is unrelated to the journal sequence), so the linked
+    chain is rebuilt from those surviving entries instead of folded as state.
+    """
+
+    state = State()
+    folded: frozenset[int] = frozenset()
+    audit_chain: list[AuditEntry] = []
+    for sequence, kind, payload in entries:
+        if kind == "state.snapshot":
+            state = State.from_dict(payload["state"])
+            folded = frozenset(int(number) for number in payload.get("folded_sequences", []))
+            continue
+        if kind == "audit.append":
+            audit_chain.append(AuditEntry.from_dict(payload["entry"]))
+            continue
+        if sequence in folded:
+            continue
+        apply_entry(state, kind, payload)
+    state.audit = audit_chain
     return state

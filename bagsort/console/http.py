@@ -91,6 +91,16 @@ class Request:
     payload: dict[str, object] = field(default_factory=dict)
     items: tuple[object, ...] = ()
     params: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
+
+    def credential(self) -> str:
+        """The signed hold credential, from the header or the JSON body."""
+
+        header = self.headers.get("authorization", "")
+        if header:
+            return header
+        value = self.payload.get("credential", "")
+        return value if isinstance(value, str) else str(value)
 
     def str_field(self, name: str, default: str = "") -> str:
         value = self.payload.get(name, default)
@@ -175,6 +185,13 @@ def build_request(environ: dict[str, object], params: dict[str, str]) -> Request
     method = str(environ.get("REQUEST_METHOD", "GET")).upper()
     path = str(environ.get("PATH_INFO", "/") or "/")
     query = parse_qs(str(environ.get("QUERY_STRING", "")))
+    headers = {
+        key[5:].replace("_", "-").lower(): str(value)
+        for key, value in environ.items()
+        if key.startswith("HTTP_")
+    }
+    if environ.get("CONTENT_TYPE"):
+        headers["content-type"] = str(environ["CONTENT_TYPE"])
     try:
         length = int(environ.get("CONTENT_LENGTH") or 0)
     except (TypeError, ValueError):
@@ -201,4 +218,5 @@ def build_request(environ: dict[str, object], params: dict[str, str]) -> Request
         payload=payload,
         items=items,
         params=params,
+        headers=headers,
     )

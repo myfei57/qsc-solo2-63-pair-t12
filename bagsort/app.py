@@ -19,6 +19,8 @@ from bagsort.flight.book import FlightBook
 from bagsort.flight.close import FlightCloser
 from bagsort.flight.mapping import BagMapping
 from bagsort.flight.schedule import ScheduleBoard
+from bagsort.hold.auth import Authorizer
+from bagsort.hold.registry import HoldRegistry
 from bagsort.ids import IdFactory
 from bagsort.inject.injector import Injector
 from bagsort.model.entities import Bag, Flight, Reading, SortRecord
@@ -68,6 +70,7 @@ class Plant:
     belt: Belt
     quota: QuotaBook
     audit: AuditChain
+    holds: HoldRegistry
     report: PlantReport
 
     @property
@@ -82,6 +85,7 @@ class Plant:
         store: Store,
         terminal: str = DEFAULT_TERMINAL,
         clock: Clock | None = None,
+        hold_secret: str = "bagsort-dev-hold-secret",
     ) -> "Plant":
         clock = clock or Clock()
         namespace = Namespace(terminal)
@@ -123,6 +127,7 @@ class Plant:
         report = PlantReport(
             store, book, chutes, belt, quota, audit, namespace, handling_line()
         )
+        holds = HoldRegistry(store, clock, audit, Authorizer(hold_secret, clock))
         return cls(
             store=store,
             clock=clock,
@@ -146,6 +151,7 @@ class Plant:
             belt=belt,
             quota=quota,
             audit=audit,
+            holds=holds,
             report=report,
         )
 
@@ -245,6 +251,12 @@ class Plant:
 
     def verify(self) -> bool:
         return self.audit.verify()
+
+    def reset(self) -> None:
+        """Clear history through the hold gate (refused while holds are active)."""
+
+        self.holds.vet_reset()
+        self.store.reset()
 
 
 class _AuditSubscriber:

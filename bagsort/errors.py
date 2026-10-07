@@ -46,3 +46,15 @@ class QuotaError(ControlError):
     """A quota or capacity bound rejected the request."""
 
     code = "quota_exceeded"
+
+
+class HoldViolation(ControlError):
+    """A mutation, compact or release would disturb a record under forensic hold."""
+
+    code = "hold_violation"
+
+
+class AuthorizationError(ControlError):
+    """The acting credential is missing, lacks the role, or is not valid."""
+
+    code = "forbidden"
